@@ -1050,10 +1050,13 @@ render();
    Liest und schreibt dieselbe wochenplan.json wie die Mac-App (Konto daniel@list.immobilien).
    Schreiben = frisch laden, nur die eigenen Änderungen einmischen, hochladen.
    So werden Änderungen, die die Mac-App inzwischen gespeichert hat, nicht überschrieben. */
+/* Eigene Installation (Daniel) erkennt man an der Adresse; jede andere Kopie fragt beim ersten Start nach ihrer eigenen Client-ID
+   und sucht den Ordner "W-Wochenplan" im eigenen Google Drive. */
+const OWN=location.hostname==="daniellist-afk.github.io";
 const CFG={
-  clientId:"278844094872-daa7rqnd3kd04k74ikriemg2hrsgbn2l.apps.googleusercontent.com",                                 // OAuth-Client-ID; leer = wird beim ersten Start abgefragt
-  folderId:"1X8DhOTTvF-_2U8fmp97dA_nvqmljgWBt",   // Drive: Meine Ablage/Claude/W-Wochenplan
-  account:"daniel@list.immobilien",
+  clientId:OWN?"278844094872-daa7rqnd3kd04k74ikriemg2hrsgbn2l.apps.googleusercontent.com":"",                                 // OAuth-Client-ID; leer = wird beim ersten Start abgefragt
+  folderId:OWN?"1X8DhOTTvF-_2U8fmp97dA_nvqmljgWBt":"",   // Drive: Meine Ablage/Claude/W-Wochenplan (leer = per Name suchen)
+  account:OWN?"daniel@list.immobilien":"",
   scope:"https://www.googleapis.com/auth/drive"
 };
 const LS={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
@@ -1092,7 +1095,8 @@ const Drive={
     const st=Math.random().toString(36).slice(2);LS.set("wp-state",st);
     if(Drive.BASE)LS.set("wp-pending",JSON.stringify({base:Drive.BASE,data:DATA}));
     const p=new URLSearchParams({client_id:Drive.clientId(),redirect_uri:location.origin+location.pathname,response_type:"token",
-      scope:CFG.scope,include_granted_scopes:"true",state:st,login_hint:CFG.account});
+      scope:CFG.scope,include_granted_scopes:"true",state:st});
+    if(CFG.account)p.set("login_hint",CFG.account);
     if(silent)p.set("prompt","none");
     location.replace("https://accounts.google.com/o/oauth2/v2/auth?"+p);
   },
@@ -1116,7 +1120,17 @@ const Drive={
     if(!r.ok)throw new Error("Drive "+r.status+": "+(await r.text()).slice(0,160));
     return r;
   },
+  async findFolder(){
+    if(CFG.folderId)return CFG.folderId;
+    const c=LS.get("wp-folder-id");if(c){CFG.folderId=c;return c}
+    const q=encodeURIComponent("name='W-Wochenplan' and mimeType='application/vnd.google-apps.folder' and 'me' in owners and trashed=false");
+    const r=await Drive.api("https://www.googleapis.com/drive/v3/files?q="+q+"&fields=files(id,modifiedTime)&orderBy=modifiedTime desc");
+    const f=(await r.json()).files||[];
+    if(!f.length)throw new Error("Ordner „W-Wochenplan“ nicht in deinem Google Drive gefunden.");
+    CFG.folderId=f[0].id;LS.set("wp-folder-id",f[0].id);return f[0].id;
+  },
   async findFile(){
+    await Drive.findFolder();
     const q=encodeURIComponent("'"+CFG.folderId+"' in parents and name='wochenplan.json' and trashed=false");
     const r=await Drive.api("https://www.googleapis.com/drive/v3/files?q="+q+"&fields=files(id,modifiedTime)&orderBy=modifiedTime desc");
     const f=(await r.json()).files||[];
@@ -1177,7 +1191,7 @@ const Drive={
   /* ---- Einrichtung beim ersten Start ---- */
   setup(){
     const S=$("setup");S.hidden=false;S.replaceChildren();
-    S.append(el("h2",null,"Einrichten"),el("p",null,"Einmalig: OAuth-Client-ID aus der Google Cloud Console einfügen (endet auf .apps.googleusercontent.com). Danach meldest du dich mit "+CFG.account+" an."));
+    S.append(el("h2",null,"Einrichten"),el("p",null,"Einmalig: OAuth-Client-ID aus der Google Cloud Console einfügen (endet auf .apps.googleusercontent.com). Danach meldest du dich mit dem Google-Konto an, in dessen Drive der Ordner „W-Wochenplan“ liegt."));
     const i=el("input");i.placeholder="…apps.googleusercontent.com";i.autocapitalize="off";i.spellcheck=false;
     const b=el("button","b pri","Speichern und anmelden");b.type="button";
     b.onclick=()=>{const v=i.value.trim();if(!/\.apps\.googleusercontent\.com$/.test(v)){wpToast("Das sieht nicht nach einer Client-ID aus.");return}LS.set("wp-client-id",v);Drive.login(false)};
